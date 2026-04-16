@@ -1,7 +1,7 @@
 # Assignment 11: Build a Production Defense-in-Depth Pipeline
 
 **Course:** AICB-P1 — AI Agent Development  
-**Due:** End of Week 11  
+**Due:** End of Day 11  
 **Submission:** `.ipynb` notebook + individual report (PDF or Markdown)
 
 ---

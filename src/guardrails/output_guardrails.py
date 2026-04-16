@@ -41,12 +41,11 @@ def content_filter(response: str) -> dict:
 
     # PII patterns to check
     PII_PATTERNS = {
-        # TODO: Add regex patterns for:
-        # - VN phone number: r"0\d{9,10}"
-        # - Email: r"[\w.-]+@[\w.-]+\.[a-zA-Z]{2,}"
-        # - National ID (CMND/CCCD): r"\b\d{9}\b|\b\d{12}\b"
-        # - API key pattern: r"sk-[a-zA-Z0-9-]+"
-        # - Password pattern: r"password\s*[:=]\s*\S+"
+        "VN Phone": r"0\d{9,10}",
+        "Email": r"[\w.-]+@[\w.-]+\.[a-zA-Z]{2,}",
+        "National ID": r"\b\d{9}\b|\b\d{12}\b",
+        "API Key": r"sk-[a-zA-Z0-9-]{20,}",
+        "Password": r"(password|mật khẩu|admin123)\s*[:=]?\s*\S+",
     }
 
     for name, pattern in PII_PATTERNS.items():
@@ -89,15 +88,12 @@ Respond with ONLY one word: SAFE or UNSAFE
 If UNSAFE, add a brief reason on the next line.
 """
 
-# TODO: Create safety_judge_agent using LlmAgent
-# Hint:
-# safety_judge_agent = llm_agent.LlmAgent(
-#     model="gemini-2.0-flash",
-#     name="safety_judge",
-#     instruction=SAFETY_JUDGE_INSTRUCTION,
-# )
-
-safety_judge_agent = None  # TODO: Replace with implementation
+# Implement safety_judge_agent
+safety_judge_agent = llm_agent.LlmAgent(
+    model="gemini-2.0-flash",
+    name="safety_judge",
+    instruction=SAFETY_JUDGE_INSTRUCTION,
+)
 judge_runner = None
 
 
@@ -108,6 +104,10 @@ def _init_judge():
         judge_runner = runners.InMemoryRunner(
             agent=safety_judge_agent, app_name="safety_judge"
         )
+
+
+# Initialize the judge immediately
+_init_judge()
 
 
 async def llm_safety_check(response_text: str) -> dict:
@@ -159,6 +159,14 @@ class OutputGuardrailPlugin(base_plugin.BasePlugin):
                     text += part.text
         return text
 
+    def _replace_response(self, llm_response, new_text: str):
+        """Helper to modify the content of an llm_response."""
+        llm_response.content = types.Content(
+            role="model",
+            parts=[types.Part.from_text(text=new_text)]
+        )
+        return llm_response
+
     async def after_model_callback(
         self,
         *,
@@ -172,16 +180,28 @@ class OutputGuardrailPlugin(base_plugin.BasePlugin):
         if not response_text:
             return llm_response
 
-        # TODO: Implement logic:
         # 1. Call content_filter(response_text)
-        #    - If issues found: replace llm_response.content with redacted version
-        #    - Increment self.redacted_count
-        # 2. If use_llm_judge: call llm_safety_check(response_text)
-        #    - If unsafe: replace llm_response.content with a safe message
-        #    - Increment self.blocked_count
-        # 3. Return llm_response (possibly modified)
+        cf_result = content_filter(response_text)
+        if not cf_result["safe"]:
+            self.redacted_count += 1
+            # Replace with redacted version
+            self._replace_response(llm_response, cf_result["redacted"])
+            # Update response_text for the next check
+            response_text = cf_result["redacted"]
 
-        return llm_response  # TODO: modify if needed
+        # 2. If use_llm_judge: call llm_safety_check(response_text)
+        if self.use_llm_judge:
+            judge_result = await llm_safety_check(response_text)
+            if not judge_result["safe"]:
+                self.blocked_count += 1
+                # Replace with block message
+                self._replace_response(
+                    llm_response, 
+                    "Blocked by Output Guardrails: This response was flagged as unsafe for delivery."
+                )
+
+        # 3. Return llm_response (possibly modified)
+        return llm_response
 
 
 # ============================================================
